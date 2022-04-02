@@ -1,4 +1,4 @@
-from default_var import *
+from common import *
 from logit import *
 from RAW.logit import lgt as lgt1
 

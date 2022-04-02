@@ -1,80 +1,56 @@
 # pip install pandas,numpy,matplotlib,sklearn,scipy,xlsxwriter,xlrd
-# from logit import lgt
+from importlib import reload
+from types import MethodType
+import logit
+import bins
+reload(logit)
+reload(bins)
+from logit import lgt
 import pandas as pd
-from draw import draw_bar
+
+for i in ["cluster","cluster_draw"]:
+    setattr(lg2,i,MethodType(getattr(lgt,i),lg2))
+
+df1 = pd.read_csv("sample_train.csv", encoding='GBK',index_col=0)
+df2 = pd.read_csv("sample_test.csv", encoding='GBK',index_col=0)
+df3 = pd.read_csv("sample_oot.csv", encoding='GBK',index_col=0)
+
+df=pd.concat([df1,df2,df3])
+y=df["label"]
+x=df.drop("label",axis=1)
+lg2.y.mean()
+lg2.binning(cnt_min=300,pass_error=True)
+len(lg2.bins)
+lg2.binning_cnt()
+lg2.woe_update()
+lg2.corr_update()
+conds = cond_part(pd.to_datetime(lg2.x["dt"]), 0.5)
+lg2.sub_binning(conds = conds, labels = ["early", "late"])
+lg2.sub_binning_plot()
+lg2.draw_binning_excel()
+lg2.bins["feature_24"].show()
+
+lg2.psi.sort_values()
+lg2.tsi.sort_values()
+lg2.bins.entL.sort_values(ascending=False)
 
 
-df1 = pd.read_csv(".\sample_train.csv", encoding='GBK')
-df2 = pd.read_csv("sample_test.csv", encoding='GBK')
-df3 = pd.read_csv("sample_oot.csv", encoding='GBK')
+cols1 = [i for i in lg2.bins.entL.index if i != "feature_9"]
+lg2.cluster(cols1,min_value=0.6)
+lg2.cluster_draw()
 
-def gg():
-    return 1
-
-
-
-# M-num goto project/Structure/Bookmark/etc.
-
-# C-` quick switch theme
-# S-Esc hide
-# duplicate line
-# S-Delete cut-line
-
-# C-4: copy paths
-# C-1: Toggle Sticky Selection
-# S-Enter: start new line
-# C-M-Enter: start new line above
-# C-+: extend selection
-
-# S-up: move line up
-# S-down: move line down
-
-## search
-# S-S navigate anything
-# C-s search in current file
-# C-s: Then C-S-r: replace
-# C-c C-f find
-# C-c C-t replace
-# M-x toggle-regexp
-# C-x b: switcher [switch buffer]
-# M-F7: find usage
-
-## recent
-# C-c r:recent file
-# C-c C-r:recent changes
-
-# code refactor/generation/extract
-# M-Enter:show fix
-# C-x C-r: reformat code
-# C-Enter: generate, for mare in code-tab
-# C-c 2: inline
-# C-c 3: extract, include method, variable, constant, field...
-# C-c 4: rename
+gp_cols=["feature_14","feature_15","feature_27","feature_11","feature_8"]
+single_cols_drop=[]
+single_cols_left=[i for i in lg2.single_cols if i not in single_cols_drop]
 
 
-## tab
-# C-c w:close tab
-# M-Right:move to next tab
-# M-Left:move to previous tab
+cols2=single_cols_left+gp_cols
+conds = cond_part(pd.to_datetime(lg2.x["dt"]), [0.6,0.8])
+train_cond=conds[0]
+valid_conds=conds[1:2]
+test_conds=conds[2:3]
+lg2.train(cols2,train_cond=train_cond,test_conds=test_conds,valid_conds=valid_conds,train_param={"ang": 1.2})
+lg2.iter_info
+lg2.coef
 
-## main
-# C-z: undo
-# C-S-z: redo
-# C-x C-f: open
-# C-0: increse font size
-# C-9: decrese font size
 
-# C-d duplicated line
-# C-w C-S-w
-# S-enter
-# C-M-enter
-# C-S-enter
-
-## snippet
-# main
-
-## test
-# C-c t: go to test; use unittest
-
-## f-string
-# type f"", then type in word between colon, and you will find some magic

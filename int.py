@@ -1,4 +1,4 @@
-from default_var import *
+from common import *
 from scipy import stats
 
 
