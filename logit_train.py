@@ -7,6 +7,8 @@ from collections import OrderedDict
 from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression,LogisticRegressionCV
 
+
+
 def KS(y, x):
     z = pd.concat([y, x], axis = 1)
     z.columns = ["label", "x"]
@@ -16,9 +18,6 @@ def KS(y, x):
     z_good = z1["good"].  cumsum() / z1["good"]. sum()
     return - (z_bad - z_good).min()
 
-
-## TODO 改写为 引用 fit_func
-
 def score_quant(x, quant = 10, single_tick = False):
     ef = bins_count(splt_eqfrq(x = x, quant = 10, single_tick = False).fi_list)
     efl = ef.show_all()["left"]. tolist()
@@ -26,6 +25,68 @@ def score_quant(x, quant = 10, single_tick = False):
     efl.append(1)
     return efl
 
+
+class hess:
+    def __init__(self, x, y, log, sample_weight=None) -> None:
+        self.x=x
+        self.y=y
+        self.sample_weight=sample_weight
+        self.log=log
+        w1 = y - log
+        w2 = -log * (1 - log)
+        if sample_weight is not None:
+            w1 = w1 * sample_weight
+            w2 = w2 * sample_weight
+        self.w1=w1
+        self.w2=-w2
+        self.ori=self.w1/self.w2
+        self.limit_ori()
+
+    def inner(self,x1,x2):
+        return (x1*(self.w2)*x2).sum()
+
+    def ang(self,x1,x2):
+        return self.inner(x1,x2)/(self.inner(x1,x1)*self.inner(x2,x2))**(1/2)
+
+    def inner_st(self,x1,x2):
+        return x1@self.g2@x2
+
+    def ang_st(self,x1,x2):
+        return self.inner_st(x1,x2)/(self.inner_st(x1,x1)*self.inner_st(x2,x2))**(1/2)
+
+    def limit_ori(self):
+        g1 = (self.w1 * self.x.T).sum(axis = 1)
+        g2 = ((self.x.T * self.w2)@self.x)
+        g2_inv = pd.DataFrame(np.linalg.pinv(g2.values), g2.columns, g2.index)
+        self.g1=g1
+        self.g2=g2
+        self.ori_st = g1 @ g2_inv
+        self.ori_st_stack=self.x@self.ori_st
+        self.ori_st_ang=self.ang(self.ori,self.ori_st_stack)
+
+        self.sqr=pd.Series(np.diag(self.g2), index=self.g2.index)
+        self.ori_sqr=self.inner_st(self.ori_st,self.ori_st)
+        self.inner_idx=self.g2@self.ori_st
+        self.ang_idx=self.inner_idx/((self.ori_sqr)*self.sqr)**(1/2)
+
+
+    def split(self,cond):
+        self.cond=cond
+        sw1,sw2=(None,None) if self.sample_weight is None else (self.sample_weight.loc[cond],self.sample_weight.loc[~cond])
+        h1=hess(x=self.x.loc[cond],y=self.y.loc[cond],log=self.log.loc[cond],
+                sample_weight=sw1)
+        h2=hess(x=self.x.loc[~cond],y=self.y.loc[~cond],log=self.log.loc[~cond],
+                sample_weight=sw2)
+        self.h1=h1
+        self.h2=h2
+        self.split_ang()
+
+    def split_ang(self):
+        v=pd.Series(0,index=self.y.index)
+        v.loc[self.cond]=self.h1.ori_st_stack
+        v.loc[~self.cond] = self.h2.ori_st_stack
+        self.combine_v=v
+        self.combine_ang=self.ang(self.combine_v,self.ori_st_stack)
 
 class log_train:
     def __init__(self, x, y, C = 0.1,
@@ -40,22 +101,31 @@ class log_train:
             
         self.x = x
         self.y = y
-        self.quant = quant
         self.sample_weight = sample_weight
+        if sample_weight is None:
+            self.woe=self.y.mean()
+        else:
+            self.woe=(self.y*self.sample_weight).mean()
+
+        self.quant = quant
         self.C = C
-        self.woe = math.log(y.sum() / (y.shape[0] - y.sum()))
-        self.exp = pd.Series(self.woe, index = y.index)
-        self.log = pd.Series(y.mean(), index = y.index)
+        self.penalty=penalty
+
+        self.log = pd.Series(self.woe, index = y.index)
         self.st = score_quant(x = self.log, quant = self.quant, single_tick = False)
-        self.cross = self.x.T@self.x
-        self.sqr = pd.Series([self.cross.iat[i, i] for i in range(x.shape[1])], index = x.columns)
-        self.corr = ((self.cross ** 2) / self.sqr).T / self.sqr
+
         self.intercept = self.woe
         self.cols = []
         self.coef_dict = dict()
-        self.result = []
+
+        self.result=list()
+
         self.update_hess()
-        self.record_result()
+        #self.record_result()
+
+
+    def update_hess(self):
+        self.hess = hess(x=self.x, y=self.y, log=self.log, sample_weight=self.sample_weight)
 
     @property
     def coef(self):
@@ -64,9 +134,8 @@ class log_train:
     def train(self):
         cols = self.cols
         coef = self.coef.tolist()
-        
         lr = LogisticRegression(C = self.C,
-                                penalty = "l2",
+                                penalty = self.penalty,
                                 solver="lbfgs",
                                 warm_start = True, 
                                 max_iter=100,
@@ -83,65 +152,8 @@ class log_train:
         self.intercept = lr.intercept_[0]
         self.log = pd.Series(lr.predict_proba(x)[:, 1], index = y.index)
         self.st = score_quant(x = self.log, quant = self.quant, single_tick = False)
-        self.exp = self.log.apply(lambda x:math.log(x / (1 - x)))
         self.update_hess()
         self.record_result()
-
-    @staticmethod
-    def hess(x, y, log, cross = None, sqr = None, sample_weight = None):
-        if cross is None:
-            cross = x.T@x
-        if sqr is None:
-            sqr = pd.Series([cross.iat[i, i] for i in range(x.shape[1])], index = x.columns)
-        log_sum = (1 - y - log).abs().apply(lambda x:math.log(x)).sum()
-        w1 = y - log
-        w2 = -log * (1 - log)
-
-        if sample_weight is not None:
-            w1 = w1 * sample_weight
-            w2 = w2 * sample_weight
-
-        ## g1 一阶导 g2 二阶导
-        g1 = (w1 * x.T).sum(axis = 1)
-        g2 = ((x.T * w2)@x)
-        g2_inv = pd.DataFrame(np.linalg.pinv(g2.values), g2.columns, g2.index)
-        g_newton = -g1@g2_inv
-
-
-        ## 将 w1 和 g_newton 当成两个标准方向
-        ## ang1: w1 与 xi 的夹角
-        ## ang2: g_newton 与 xi 的夹角 (系数正交度量下)
-        ang1 = g1 / (((w1 ** 2).sum() * (x.T ** 2).sum(axis = 1))**(1 / 2))
-        sqr1 = (g_newton@cross)@g_newton
-        ang2 = (g_newton@cross) / ((sqr * sqr1)**(1 / 2))
-
-        ## ang3: g_newton 与 xi 的夹角 (g2 度量下)
-        g2_idx_sqr = pd.Series(np.diag(-g2), index = g2.index)
-        g2_idx_st = g_newton@ (- g2)
-        g2_st_sqr = g2_idx_st@g_newton
-        ang3 = g2_idx_st / ((g2_idx_sqr * g2_st_sqr)**(1 / 2))
-
-        return {
-            "log_sum": log_sum,
-            "w1": w1,
-            "w2": w2,
-            "g1": g1,
-            "g2": g2,
-            "g2_inv": g2_inv,
-            "g_newton": g_newton,
-            "g2_st_sqr": g2_st_sqr, 
-            "ang1": ang1,
-            "ang2": ang2,
-            "ang3": ang3, 
-        } 
-        
-    def update_hess(self):
-        res = self.hess(x = self.x, y = self.y, log = self.log, sqr = self.sqr,
-                        cross = self.cross, sample_weight = self.sample_weight)
-        for i, j in res.items():
-            setattr(self, i, j)
-        self.ang2_porp = self.ang2 * ((self.x.shape[1] - len(self.cols))**(1 / 2))
-        self.ang3_porp = self.ang3 * ((self.x.shape[1] - len(self.cols))**(1 / 2))
 
     def record_result(self):
         ks = KS(self.y, self.log)
@@ -155,14 +167,7 @@ class log_train:
                             "coef": self.coef,
                             "intercept": self.intercept,
                             "cols": self.cols.copy(),
-                            "log_sum": self.log_sum,
-                            "g1": self.g1, 
-                            "g2": self.g2, 
-                            "ang2": self.ang2,
-                            "ang3": self.ang3, 
-                            "ang2_porp": self.ang2_porp,
-                            "ang3_porp": self.ang3_porp, 
-                            "g2_st_sqr": self.g2_st_sqr,
+                            "hess":self.hess,
                             "KS": ks,
                             "model": model, 
                             "AUC": auc,
@@ -185,12 +190,15 @@ class log_train:
             self.delete_neg()
 
     def select_new(self, **kwargs):
+        ## return i,value
         raise
 
     def delete_neg(self, **kwargs):
         pass
     
-    
+
+
+
 class lt3(log_train):
     def __init__(self, x, y,
                  train_cond,
@@ -243,7 +251,6 @@ class lt3(log_train):
             v.cols = self.cols
             v.st = self.st
             v.model = self.model
-            v.exp = v.x[v.cols]@v.coef + v.intercept
             v.log = pd.Series(v.model.predict_proba(v.x[v.cols])[:, 1], index = v.y.index)            
             v.update_hess()
             v.record_result()
@@ -251,99 +258,91 @@ class lt3(log_train):
     def select_new(self):
         raise
 
-class lt3_ang3(lt3):
+
+
+
+
+class lt3_ang(lt3):
     def select_new(self, ang):
-        i = self.ang3_porp.idxmax()
-        v = self.ang3_porp.loc[i]
+        i = self.hess.ang_idx.idxmax()
+        v = self.hess.ang_idx.loc[i]
         print((i, v))
         if i in self.cols:
             print("idx in cols")
             return None, None
-
         if v < ang:
             print("ang less than angmin")
             return None, None
-        
         return i, v
 
-class lt3_ang2(lt3):
+
+class lt3_ang_scale(lt3):
     def select_new(self, ang):
-        i = self.ang2_porp.idxmax()
-        v = self.ang2_porp.loc[i]
+        i = self.hess.ang_idx.idxmax()
+        v = self.hess.ang_idx.loc[i]*(self.x.shape[1]-len(self.cols))**(1/2)
         print((i, v))
         if i in self.cols:
             print("idx in cols")
             return None, None
-
         if v < ang:
             print("ang less than angmin")
             return None, None
         return i, v
-    
-class lt3_double_ang3(lt3):
-    def select_new(self, ang, valid_ang = 0.5):
+
+
+class lt3_ang_scale_cv(lt3):
+    def select_new(self, ang_min, ang_min_valid=0.5):
         t_cols = set(self.x.columns)
         for j, k in enumerate(self.valid):
-            ang3p = k.ang3_porp
-            tmp_cols = ang3p[ang3p > valid_ang]. index.tolist()
+            ang = k.hess.ang_idx
+            ang_s = ang * (self.x.shape[1] - len(self.cols)) ** (1 / 2)
+            tmp_cols = ang_s[ang_s > ang_min_valid].index.tolist()
             t_cols = t_cols & set(tmp_cols)
         t_cols = list(t_cols)
 
         if len(t_cols) <= 0:
             print("in valid check process, no cols left")
+            return None,None
 
-        ang3p = self.ang3_porp
-        ang3p = ang3p.loc[t_cols]
-        i = ang3p.idxmax()
-        v = ang3p.loc[i]
+        ang = k.hess.ang_idx
+        ang_s = ang * (self.x.shape[1] - len(self.cols)) ** (1 / 2)
+        ang_s = ang_s.loc[t_cols]
+        i = ang_s.idxmax()
+        v = ang_s.loc[i]
         print(("add index", i, v))
-        
+
         if i in self.cols:
             print("idx in cols")
             return None, None
 
-        if v < ang:
-            print("ang3 less than angmin")
+        if v < ang_min:
+            print("ang less than angmin")
             return None, None
-            
+
         return i, v
 
     def drop_idx(self, i):
         self.cols = [j for j in self.cols if j != i]
         del self.coef_dict[i]
-        
+
     def delete_neg(self):
         while True:
-            ang3 = self.ang3_porp.loc[self.cols]
-            ang3_neg = ang3[ang3 < 0.0]
-            if len(ang3_neg) >= 1:
-                i = ang3_neg.idxmin()
-                value = ang3_neg.loc[i]
+            ang = self.hess.ang_idx.loc[self.cols]
+            ang_neg = ang[ang < 0.0]
+            if len(ang_neg) >= 1:
+                i = ang_neg.idxmin()
+                value = ang_neg.loc[i]
                 print(("drop index", i, value))
                 self.drop_idx(i)
                 self.train()
             else:
                 break
-    
 
 
-    ##############################################################################################################
-    # def compare_coef(self, cond):                                                                              #
-    #     cond1 = cond                                                                                           #
-    #     cond2 = ~cond                                                                                          #
-    #     log = pd.Series(self.y.mean(), index = self.y.index)                                                   #
-    #     res1 = log_train.hess(x = self.x.loc[cond1], y = self.y.loc[cond1], log = log.loc[cond1])              #
-    #     res2 = log_train.hess(x = self.x.loc[cond2], y = self.y.loc[cond2], log = log.loc[cond2])              #
-    #     p1 = self.x@self.g_newton                                                                              #
-    #     p1_1 = self.x@res1["g_newton"]                                                                         #
-    #     p1_2 = self.x@res2["g_newton"]                                                                         #
-    #     p12 = pd.concat([self.x.loc[cond1]@res1["g_newton"], self.x.loc[cond2]@res2["g_newton"]]).sort_index() #
-    #     p2 = self.x[self.cols]@self.coef                                                                       #
-    #     pc = pd.concat([p1, p1_1, p1_2, p12, p2], axis = 1)                                                    #
-    #     pc.columns = ["n", "n1", "n2", "n12", "f"]                                                             #
-    #     return pc.corr()                                                                                       #
-    ##############################################################################################################
-
+conds=cond_part(pd.to_datetime(lg2.x["dt"]),[0.6,0.8])
+gg=lt3_ang_scale_cv(x=lg2.woevalue,y=lg2.y,train_cond=conds[0],valid_conds=conds[1:2],test_conds=conds[2:])
+gg.recursive_train(ang_min=1.5,ang_min_valid=2)
+pd.DataFrame([i["coef"] for i in gg.result])
 
 
 

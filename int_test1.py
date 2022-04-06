@@ -8,8 +8,8 @@ reload(bins)
 from logit import lgt
 import pandas as pd
 
-for i in ["cluster","cluster_draw"]:
-    setattr(lg2,i,MethodType(getattr(lgt,i),lg2))
+##for i in ["cluster","cluster_draw"]:
+##    setattr(lg2,i,MethodType(getattr(lgt,i),lg2))
 
 df1 = pd.read_csv("sample_train.csv", encoding='GBK',index_col=0)
 df2 = pd.read_csv("sample_test.csv", encoding='GBK',index_col=0)
@@ -18,12 +18,17 @@ df3 = pd.read_csv("sample_oot.csv", encoding='GBK',index_col=0)
 df=pd.concat([df1,df2,df3])
 y=df["label"]
 x=df.drop("label",axis=1)
-lg2.y.mean()
+lg2=lgt(x=x,y=y)
 lg2.binning(cnt_min=300,pass_error=True)
 len(lg2.bins)
 lg2.binning_cnt()
 lg2.woe_update()
 lg2.corr_update()
+
+x1=lg2.woevalue
+
+
+
 conds = cond_part(pd.to_datetime(lg2.x["dt"]), 0.5)
 lg2.sub_binning(conds = conds, labels = ["early", "late"])
 lg2.sub_binning_plot()
