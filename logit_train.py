@@ -1,4 +1,5 @@
 import pandas as pd
+import pickle
 import numpy as np
 import math
 from bins import *
@@ -26,7 +27,17 @@ def score_quant(x, quant=10, single_tick=False):
     return efl
 
 class hess:
+    """
+    N为样本数 M为指标个数
+    因变量取值空间可以视为两种线性空间:
+    样本底数为单位元:N维空间
+    指标列向量为单位元:M维空间
+    """
     def __init__(self, x, y, log, sample_weight=None) -> None:
+        """
+        w1: 一阶导数
+        w2: 二阶导数
+        """
         self.x = x
         self.y = y
         self.sample_weight = sample_weight
@@ -54,6 +65,9 @@ class hess:
         return self.inner_st(x1, x2) / (self.inner_st(x1, x1) * self.inner_st(x2, x2)) ** (1 / 2)
 
     def limit_ori(self):
+        """
+        将方向限制在 x所在
+        """
         g1 = (self.w1 * self.x.T).sum(axis=1)
         g2 = ((self.x.T * self.w2) @ self.x)
         g2_inv = pd.DataFrame(np.linalg.pinv(g2.values), g2.columns, g2.index)
@@ -81,6 +95,9 @@ class hess:
         self.split_ang()
 
     def split_ang(self):
+        """
+        
+        """
         v = pd.Series(0, index=self.y.index)
         v.loc[self.cond] = self.h1.ori_st_stack
         v.loc[~self.cond] = self.h2.ori_st_stack
@@ -328,19 +345,4 @@ class lt3_ang_scale_cv(lt3):
                 self.train()
             else:
                 break
-
-gg.hess.x["feature_0"].drop_duplicates().sort_values()
-cond=gg.hess.x["feature_0"]<0
-gg.hess.split(cond)
-gg.hess.combine_ang
-
-conds = cond_part(pd.to_datetime(lg2.x["dt"]), [0.6, 0.8])
-gg = lt3_ang_scale_cv(x=lg2.woevalue, y=lg2.y, train_cond=conds[0], valid_conds=conds[1:2], test_conds=conds[2:])
-gg.recursive_train(ang_min=1.5, ang_min_valid=1)
-pd.DataFrame([i["coef"] for i in gg.result])
-
-gg.result[-1]["KS"]
-gg.valid[0].result[-1]["KS"]
-gg.test[0].result[-1]["KS"]
-
 

@@ -198,7 +198,6 @@ class lgt:
             cn_name_abbr = cn_name[:30] + ("..." if len(cn_name) > 30 else "")
 
             title = en_name_abbr + "\n" + cn_name_abbr
-
             self.barplot(en_name, title=title, path=path, draw_bad_rate=draw_bad_rate, upper_lim=upper_lim)
 
     def barplot_df(self, i):
@@ -270,7 +269,6 @@ class lgt:
             df = self.woevalue
         else:
             df = self.woevalue[cols]
-
         self.corr = df.corr()
 
     def dev_trend(self):
@@ -349,7 +347,7 @@ class lgt:
               train_cond,
               valid_conds=[],
               test_conds=[],
-              train_class=lt3_ang3,
+              train_class=lt3_ang,
               init_param={"penalty": "l2", "C": 0.5, "quant": 10},
               train_param={"ang": 1.5},
               quant=10,

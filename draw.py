@@ -88,7 +88,7 @@ def draw_bar(_df, save = None, title = None, ax = None, draw_bad_rate: object = 
     ax1.legend(fontsize = 8)
     if not save is None:
         plt.savefig(save, dpi = 200, bbox_inches = 'tight')
-    return g
+    return None
 
 def get_resized_image_data(file_path, bound_width_height = None):
     # get the image and resize it
