@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import pandas as pd
 import pickle
 import numpy as np
@@ -28,15 +29,31 @@ def score_quant(x, quant=10, single_tick=False):
 
 class hess:
     """
-    NΪ������ MΪָ�����
-    �����ȡֵ�ռ������Ϊ�������Կռ�:
-    ��������Ϊ��λԪ:Nά�ռ�
-    ָ��������Ϊ��λԪ:Mά�ռ�
+    hess矩阵模块
+    x.shape=[N,M] N为样本数 M为指标个数
+    效用函数为 C=sigma(ln(abs(logi-yi)))=C(log)
+    y(yi组成列向量) 为定值 log(logi组成列向量)为变量 也是我们要优化的对象
+    根据C在当前log处的一阶/二阶导 确定最优方向
+
+    log=x@coef
+    因变量取值空间可以视为两种线性空间:
+    log:N维空间 记为F空间
+    coef:M维空间 记为G空间 也称作为标准子空间
+    G空间是F空间的线性子空间
+
+    二阶导数赋予F空间一个度量:D
+    也可堪称是G空间下的度量:D1
+    
     """
     def __init__(self, x, y, log, sample_weight=None) -> None:
         """
-        w1: һ�׵���
-        w2: ���׵���
+        w1: 一阶导数-G空间
+        w2: 二阶导数-G空间
+        w2也可以看成F空间上的度量矩阵
+        和内积有关的矩阵乘法中间插入W2
+        
+        ori: 二阶最优delta列向量-G空间
+        也可看成一个方向
         """
         self.x = x
         self.y = y
@@ -53,20 +70,42 @@ class hess:
         self.limit_ori()
 
     def inner(self, x1, x2):
+        """
+        内积:D
+        """
         return (x1 * self.w2 * x2).sum()
 
     def ang(self, x1, x2):
+        """
+        角度
+        """
         return self.inner(x1, x2) / (self.inner(x1, x1) * self.inner(x2, x2)) ** (1 / 2)
 
     def inner_st(self, x1, x2):
+        """
+        标准子空间G上的内积:D1
+        """
         return x1 @ self.g2 @ x2
 
     def ang_st(self, x1, x2):
+        """
+        标准子空间G中的角度
+        """
         return self.inner_st(x1, x2) / (self.inner_st(x1, x1) * self.inner_st(x2, x2)) ** (1 / 2)
 
     def limit_ori(self):
         """
-        ������������ x����
+        限制在G空间中最优方向
+        计算最优下降方向
+        g1: G空间中的1阶导数
+        g2: G空间中的2阶导数 也可堪称G空间中列向量内积
+        ori_st: 局部最优方向在G空间中的系数
+        ori_st_stack: 局部最优方向在F空间中的系数
+        ori_st_ang: 局部最优方向与F空间标准方向的夹角
+        sqr: G空间所有标准向量自内积
+        ori_sqr: G空间最优向量子内积
+        inner_idx: G空间标准向量和最优向量内积
+        ang_idx: G空间标准向量和最优向量夹角
         """
         g1 = (self.w1 * self.x.T).sum(axis=1)
         g2 = ((self.x.T * self.w2) @ self.x)
@@ -83,6 +122,16 @@ class hess:
         self.ang_idx = self.inner_idx / (self.ori_sqr * self.sqr) ** (1 / 2)
 
     def split(self, cond):
+        """
+        cond ~cond
+        将x,y,log分别生成两片样本
+        分别独自形成hess
+        进而独自形成最优分量
+
+        两部分最优方向拼接出一个方向 和 整体最优方向
+        之间计算角度 用来衡量分裂程度
+        角度越大 分裂程度越大
+        """
         self.cond = cond
         sw1, sw2 = (None, None) if self.sample_weight is None else (
         self.sample_weight.loc[cond], self.sample_weight.loc[~cond])
@@ -96,7 +145,7 @@ class hess:
 
     def split_ang(self):
         """
-        
+        计算分裂度        
         """
         v = pd.Series(0, index=self.y.index)
         v.loc[self.cond] = self.h1.ori_st_stack
@@ -106,6 +155,15 @@ class hess:
 
 
 class log_train:
+    """
+    逐步逻辑回归
+    -单样本计算模块
+    -入参:
+    x y sample_weight
+    执行hess一套
+    根据设定规则
+    逐步加入入参
+    """
     def __init__(self, x, y, C=0.1,
                  cond=None,
                  quant=10,
@@ -147,6 +205,9 @@ class log_train:
         return pd.Series([self.coef_dict.get(i, 0) for i in self.cols], index=self.cols)
 
     def train(self):
+        """
+        在原系数基础上进行训练
+        """
         cols = self.cols
         coef = self.coef.tolist()
         lr = LogisticRegression(C=self.C,
@@ -171,6 +232,9 @@ class log_train:
         self.record_result()
 
     def record_result(self):
+        """
+        记录训练结果
+        """
         ks = KS(self.y, self.log)
         auc = roc_auc_score(self.y, self.log)
         z = pd.concat([self.y, self.log], axis=1)
@@ -190,11 +254,18 @@ class log_train:
                             })
 
     def prepare_new(self, i):
+        """
+        i为新添加指标
+        将新指标系数初始化为0
+        """
         assert i not in self.cols
         self.cols += [i]
         self.coef_dict = {i: self.coef.get(i, 0) for i in self.cols}
 
     def recursive_train(self, **kwargs):
+        """
+        逐步回归
+        """
         while True:
             i, value = self.select_new(**kwargs)
             if i is None:
@@ -204,14 +275,27 @@ class log_train:
             self.delete_neg()
 
     def select_new(self, **kwargs):
+        """
+        自定义添加指标操作
+        return i(指标),value(值)
+        None,None表示停止循环
+        """
         ## return i,value
         raise
 
     def delete_neg(self, **kwargs):
+        """
+        自定义删除指标机制
+        默认不操作
+        """
         pass
 
 
 class lt3(log_train):
+    """
+    将总体样本分成train valid test三部分数据
+    select_new 可以为train和valid结合判定
+    """
     def __init__(self, x, y,
                  train_cond,
                  train_sample_weight=None,
@@ -255,6 +339,10 @@ class lt3(log_train):
         self.copy_param()
 
     def copy_param(self):
+        """
+        将train更新的系数同步至
+        valid test中
+        """
         for v in self.valid + self.test:
             v.coef_dict = self.coef_dict
             v.intercept = self.intercept

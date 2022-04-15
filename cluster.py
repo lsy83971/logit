@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-  
 import math
 class ClusterNode:
     def __init__(self,center):

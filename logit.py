@@ -1,4 +1,6 @@
+# -*- coding: utf-8 -*-  
 import os
+import re
 from common import *
 from datetime import datetime
 import xlsxwriter
@@ -125,6 +127,10 @@ class lgt:
                 pass_error=True,
 
                 ):
+
+        """
+        bin_sample分箱用样本
+        """
         self.init_container()
 
         if bin_sample is None:
@@ -191,9 +197,8 @@ class lgt:
             cols = self.bins.keys()
         for en_name in cols:
             cn_name = self.cmt.get(en_name, "")
-            path = self.png_dir + (en_name + "##" + cn_name + ".png").replace("/", "_")
+            path = self.png_dir + re.sub("[/()（）<>]", "_", en_name + "##" + cn_name + ".png")
             self.plot_path[en_name] = path
-
             en_name_abbr = en_name[:35] + ("..." if len(en_name) > 35 else "")
             cn_name_abbr = cn_name[:30] + ("..." if len(cn_name) > 30 else "")
 
@@ -352,6 +357,11 @@ class lgt:
               train_param={"ang": 1.5},
               quant=10,
               ):
+        """
+        train_class: 逐步回归细类
+        init_param: 逐步回归初始化参数
+        train_param: 逐步回归新增指标时 选指标参数
+        """
         lt = train_class(x=self.woevalue[cols],
                          y=self.y,
                          train_cond=train_cond,
